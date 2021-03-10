@@ -134,6 +134,8 @@ def train_model(model,train_samples,dev_samples,best_model_file):
         move_last_batch = True
         batch_cnt -= 1
 
+    F.max_pool1d()
+
 
 
 
