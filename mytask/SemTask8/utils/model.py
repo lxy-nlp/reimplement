@@ -23,8 +23,24 @@ class  SimpleModel(nn.Module):
         self.classifier = nn.Linear(hidden_dim // 2, num_class)
         self.attn = MultiHeadAttention()
 
-    def forward(self,x):
-        pass
+    def forward(self, x):
+        '''
+
+        :param x:
+        :return:
+        output(seq_len, batch, hidden_size * num_directions)
+        hn(num_layers * num_directions, batch, hidden_size)
+        cn(num_layers * num_directions, batch, hidden_size)
+
+        '''
+        x_emb = self.embbeddings(x)
+        out,(h_n,c_n) = self.lstm(x_emb)
+
+
+
+
+
+
 
 # 多头注意力机制
 
