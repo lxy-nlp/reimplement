@@ -1,0 +1,12 @@
+
+.idea
+*.iml
+*.ipr
+*.iws
+*.txt
+mytask/datas/*/*
+
+reimplement/.ipynb_checkpoints/*
+reimplement/pretrained_model/*
+reimplement/.idea/*
+
