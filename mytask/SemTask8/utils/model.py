@@ -19,15 +19,19 @@ class SimpleModel(nn.Module):
     '''
     准备使用args一个obj替换 下面的参数
     '''
-    def __init__(self, vocab_size, embedding_size, pre_embeddings, pos_dim, hidden_dim, head, num_class, bidirection=False):
+    def __init__(self, vocab_size, embedding_size, pre_embeddings, pos_dim, hidden_dim, head, num_class, pos_need, drop_out, bidirection=False):
         ''''''
         super(SimpleModel, self).__init__()
         self.embeddings = nn.Embedding(vocab_size, embedding_size)
         self.embeddings.weight.data.copy_(torch.from_numpy(pre_embeddings))
         self.direction = 2 if bidirection is True else 1
+        self.pos_need = pos_need
+        self.pos_conv = nn.Linear(pos_dim, pos_dim * 5)
         self.hidden_dim = self.direction * hidden_dim
         self.head = head
-        self.lstm = nn.LSTM(embedding_size + pos_dim, hidden_dim, bidirectional=bidirection)
+        self.drop_out = nn.Dropout(p=0.3)
+        self.pos_dim = 0 if pos_need == False else pos_dim * 5
+        self.lstm = nn.LSTM(embedding_size + self.pos_dim, hidden_dim, bidirectional=bidirection)
         self.attn = MultiHeadAttention(head, self.hidden_dim)
         self.linear = nn.Linear(self.hidden_dim * 3, self.hidden_dim)
         self.activation = nn.ReLU()
@@ -47,12 +51,13 @@ class SimpleModel(nn.Module):
         x_emb = self.embeddings(torch.tensor(sentence_ids))
         batch,sen_len, hidden_dim = x_emb.shape
         pos_emb = torch.tensor(pos_emb, dtype=torch.float32)
-        x_emb = torch.cat((x_emb, pos_emb), -1)
+        pos_emb = self.pos_conv(pos_emb)
+        x_emb = torch.cat((x_emb, pos_emb), -1) if self.pos_need else x_emb
         out, (h_n, c_n) = self.lstm(x_emb)
-        # out = out.permute(1, 0, 2)  # 交换维度
         attn_tensor = self.attn(out, out)
         sentence_list = torch.matmul(attn_tensor, out.reshape(batch, self.head, sen_len, self.hidden_dim // self.head))  # 得出加入权重的后的隐状态
-        sentence_list = sentence_list.reshape(batch, sen_len,-1)
+        sentence_list = sentence_list.reshape(batch, sen_len, -1)
+        sentence_list = self.drop_out(sentence_list)
         sub_pos = torch.tensor(sub_pos, dtype=torch.float32)
         obj_pos = torch.tensor(obj_pos, dtype=torch.float32)
         pool_mask = torch.tensor(mask_matrix, dtype=torch.float32)
@@ -123,7 +128,7 @@ def attention(query, key, mask=None, dropout=None):
 
 class MultiHeadAttention(nn.Module):
 
-    def __init__(self, h, d_model, dropout=0.1):
+    def __init__(self, h, d_model, dropout=0.2):
         super(MultiHeadAttention, self).__init__()
         assert d_model % h == 0
 

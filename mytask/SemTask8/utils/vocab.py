@@ -13,6 +13,7 @@ import pickle
 import re
 import torch.utils.data as Data
 import torch
+import random
 
 from mytask.SemTask8.utils import constant
 
@@ -24,7 +25,7 @@ class Vocab:
         if load:
             assert os.path.exists(filename),"Vocab file does not exist at " + filename
 
-            self.id2word,self.word2id, self.emdeddings = self.load_glove_vocab(filename, wv_dim)
+            self.id2word, self.word2id, self.emdeddings = self.load_glove_vocab(filename, wv_dim)
             self.size = len(self.id2word)
         else:
             print("Creating vocab from scratch...")
@@ -161,6 +162,7 @@ def read_datas(path, word2id, labels, labels_index, max_len=70):
 
     all_items = []
     all_pos = []
+    items = []
     for i, line in enumerate(lines):
         single_item = []
         line_split = line.split()
@@ -194,9 +196,16 @@ def read_datas(path, word2id, labels, labels_index, max_len=70):
         single_item.append(mask_matrix)
         all_pos.append(pos_embedding)
         all_items.append(single_item)
-    return all_items, labels_index, all_pos # 返回值是 训练数据 和 标签
+        items.append(one_item)
+    return all_items, labels_index, all_pos,items  # 返回值是 训练数据 和 标签
 
 def load_data(batch_size,items,labels,all_pos):
+    # shuffle  打乱数据为了 缓解过拟合
+    indexes = [i for i in range(len(labels))]
+    random.shuffle(indexes)
+    items = np.array(items)[indexes].tolist()
+    labels = np.array(labels)[indexes].tolist()
+    all_pos = np.array(all_pos)[indexes].tolist()
     item_batches = [items[i:i+batch_size] for i in range(0, len(items), batch_size)]
     label_batches = [labels[i:i+batch_size] for i in range(0, len(labels), batch_size)]
     pos_bathes = [all_pos[i:i+batch_size] for i in range(0, len(all_pos), batch_size)]
@@ -224,4 +233,3 @@ if __name__ == '__main__':
       labels, labels_index = read_labels('../../datas/SemEval2010-Task8/train/train_result.txt')
       all_items, labels = read_datas('../../datas/SemEval2010-Task8/train/train.txt',vocab.word2id,labels,labels_index)
       item_batches, label_batches = load_data(50, all_items, labels)
-      print(item_batches[:2][1]) # 这样的方式可以将 每一项都取出来

@@ -14,6 +14,9 @@ from nltk.corpus import wordnet
 
 # 探索类别的分布
 from mytask.SemTask8.utils import constant
+from nltk.corpus import wordnet
+
+from mytask.SemTask8.utils.vocab import data_item
 
 
 def data_exploration(file):
@@ -39,13 +42,34 @@ def sequence_length(file):
     return all_length
 
 # 使用Wordnet增强数据
-def data_argument(items):
-    pass
+def data_argument(items,counts,types,word2id):
+    '''
+
+    :param items: 全部数据
+    :param counts: 扩充后的数量
+    :param type: 需要扩充的类型 list [1,2,3,6,7]
+    :return: 增加后的数据
+    '''
+    added_item = []
+    added_label = []
+    added_pos = []
+    for item in items:
+        if (item.label in types) and (item.sub[0] == item.sub[1]) and (item.obj[0] == item.obj[1]):
+            sub_new = wordnet.synsets(item.sub[0])[0].lemma_names[0]
+            obj_new = wordnet.synsets(item.obj[0])[0].lemma_names[0]
+            new_item = data_item(item.sub, item.obj, item.sentence, item.label, item.label_id)
+            new_item.sentence[item.sub] = sub_new
+            new_item.sentence[item.obj] = obj_new
+            new_item.map(new_item.sentence, word2id)
+            added_item.append(new_item)
+            added_pos.append(new_item.pos_encode())
+            added_label.append(item.label)
+    return added_item, added_label, added_pos
+
 
 
 def pos_encoding(items, vocab_size):
     '''
-
     :param items: data_item list
     :param vocab_size
     :return:
@@ -125,10 +149,7 @@ if __name__ == '__main__':
     因此想到使用 EDA中的同义词替换 扩充数据
     '''
     all_length = sequence_length('../datas/SemEval2010-Task8/train/train.txt')
-    print(max(all_length),min(all_length))
-   # print(data_exploration('../datas/SemEval2010-Task8/train/train_result.txt'))
+    print(max(all_length), min(all_length))
+    print(data_exploration('../datas/SemEval2010-Task8/train/train_result.txt'))
    # print(wordnet.synsets('start'))  # 同义词替换的问题 词性
-
-
-
 

@@ -137,18 +137,9 @@ def train_model(model,train_samples,dev_samples,best_model_file):
     F.max_pool1d()
 
 
-
-
-
-
-
-
-
-
-
-# if __name__ == '__main__':
-#     s = "I am not sure,this can work"
-#     tokens = tokenizer.tokenize(s)
-#     text_dict = tokenizer.encode_plus(sentenceA, add_special_tokens=True, return_attention_mask=True)
-#     input_ids = torch.tensor(text_dict['input_ids']).unsqueeze(0)
-#     # model = CustomModel()
+if __name__ == '__main__':
+    s = "I am not sure,this can work"
+    tokens = tokenizer.tokenize(s)
+    text_dict = tokenizer.encode_plus(sentenceA, add_special_tokens=True, return_attention_mask=True)
+    input_ids = torch.tensor(text_dict['input_ids']).unsqueeze(0)
+    # model = CustomModel()
