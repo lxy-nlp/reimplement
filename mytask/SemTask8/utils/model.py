@@ -19,23 +19,26 @@ class SimpleModel(nn.Module):
     '''
     准备使用args一个obj替换 下面的参数
     '''
-    def __init__(self, vocab_size, embedding_size, pre_embeddings, pos_dim, hidden_dim, head, num_class, pos_need, drop_out, bidirection=False):
+    def __init__(self, vocab_size, embedding_size, pre_embeddings, pos_dim, hidden_dim, head, num_class, drop_out, device, pos_need=False,bidirection=False):
         ''''''
         super(SimpleModel, self).__init__()
         self.embeddings = nn.Embedding(vocab_size, embedding_size)
         self.embeddings.weight.data.copy_(torch.from_numpy(pre_embeddings))
+        self.embeddings.weight.requires_grad = False
         self.direction = 2 if bidirection is True else 1
         self.pos_need = pos_need
-        self.pos_conv = nn.Linear(pos_dim, pos_dim * 5)
+        self.pos_dim = 0 if pos_need == False else pos_dim * 10
+        self.pos_conv = nn.Linear(pos_dim, self.pos_dim)
         self.hidden_dim = self.direction * hidden_dim
         self.head = head
-        self.drop_out = nn.Dropout(p=0.3)
-        self.pos_dim = 0 if pos_need == False else pos_dim * 5
+        self.device = device
+        self.drop_out = nn.Dropout(p=drop_out)
         self.lstm = nn.LSTM(embedding_size + self.pos_dim, hidden_dim, bidirectional=bidirection)
         self.attn = MultiHeadAttention(head, self.hidden_dim)
-        self.linear = nn.Linear(self.hidden_dim * 3, self.hidden_dim)
-        self.activation = nn.ReLU()
+        self.linear = nn.Linear(self.hidden_dim * 4, self.hidden_dim)
+        self.activation = nn.LeakyReLU()
         self.classifier = nn.Linear(self.hidden_dim, num_class)
+        self.init_param()
 
     def forward(self, sentence_ids, pos_emb, sub_pos, obj_pos, mask_matrix):
         '''
@@ -48,26 +51,29 @@ class SimpleModel(nn.Module):
         cn(num_layers * num_directions, batch, hidden_size)
         在这里应该使用的是output
         '''
-        x_emb = self.embeddings(torch.tensor(sentence_ids))
-        batch,sen_len, hidden_dim = x_emb.shape
-        pos_emb = torch.tensor(pos_emb, dtype=torch.float32)
-        pos_emb = self.pos_conv(pos_emb)
-        x_emb = torch.cat((x_emb, pos_emb), -1) if self.pos_need else x_emb
+        x_emb = self.embeddings(sentence_ids)
+        self.drop_out(x_emb)
+        batch, sen_len, hidden_dim = x_emb.shape
+        x_emb = torch.cat((x_emb, self.pos_conv(pos_emb)), -1) if self.pos_need else x_emb
+        ln_1 = nn.LayerNorm(x_emb.size()[1:],elementwise_affine=True).to(self.device)  # 加入层归一化
+        ln_1(x_emb)
         out, (h_n, c_n) = self.lstm(x_emb)
+        ln_2 = nn.LayerNorm(out.size()[1:], elementwise_affine=True).to(self.device)
+        ln_2(out)
         attn_tensor = self.attn(out, out)
         sentence_list = torch.matmul(attn_tensor, out.reshape(batch, self.head, sen_len, self.hidden_dim // self.head))  # 得出加入权重的后的隐状态
         sentence_list = sentence_list.reshape(batch, sen_len, -1)
-        sentence_list = self.drop_out(sentence_list)
-        sub_pos = torch.tensor(sub_pos, dtype=torch.float32)
-        obj_pos = torch.tensor(obj_pos, dtype=torch.float32)
-        pool_mask = torch.tensor(mask_matrix, dtype=torch.float32)
-        sub_mask, obj_mask, pool_mask = sub_pos.eq(0).eq(0).unsqueeze(2), obj_pos.eq(0).eq(0).unsqueeze(2), pool_mask.eq(0).eq(0).unsqueeze(2)
+        # sentence_list = self.drop_out(sentence_list)
+        sub_mask, obj_mask, pool_mask = sub_pos.eq(0).eq(0).unsqueeze(2), obj_pos.eq(0).eq(0).unsqueeze(2), mask_matrix.eq(0).eq(0).unsqueeze(2)
         h_out = pool(sentence_list, pool_mask, type="avg")
-        subj_out = pool(sentence_list, sub_mask, type="max")
-        obj_out = pool(sentence_list, obj_mask, type="max")
-        relation = torch.cat((subj_out, h_out, obj_out), dim=-1)
+        subj_out = pool(sentence_list, sub_mask, type="avg")
+        obj_out = pool(sentence_list, obj_mask, type="avg")
+        sub_obj_hdm = obj_out * subj_out  # 加入哈达马乘积
+        relation = torch.cat((subj_out, h_out, obj_out, sub_obj_hdm), dim=-1)
+        self.drop_out(relation)  # 随机失活
         res = self.classifier(self.activation(self.linear(relation)))
-        return res
+        return res, attn_tensor,self.pos_conv.weight  # 将注意力分数作为惩罚项
+
         '''
          # pooling
         subj_mask, obj_mask = subj_pos.eq(0).eq(0).unsqueeze(2), obj_pos.eq(0).eq(0).unsqueeze(2)  # invert mask
@@ -98,6 +104,16 @@ class SimpleModel(nn.Module):
          [-1.3858,  0.0279,  0.4381, -0.4061]]])
 
         '''
+    def init_param(self):
+        nn.init.xavier_normal(self.linear.weight, gain=1)
+        nn.init.xavier_normal(self.classifier.weight, gain=1)
+        for name, param in self.lstm.named_parameters():
+            if name.startswith("weight"):
+                nn.init.xavier_normal_(param)
+            else:
+                nn.init.zeros_(param)
+
+
 
 def pool(h, mask, type='max'):
     if type == 'max':

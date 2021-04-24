@@ -148,7 +148,7 @@ def read_labels(path):
     id2label = dict(zip(indexlist, undep))
     label2id = dict(zip(undep, indexlist))
     labels_index = [label2id[label] for label in labels]
-    return labels, labels_index
+    return labels, labels_index, label2id
 
 def read_datas(path, word2id, labels, labels_index, max_len=70):
     '''
@@ -197,7 +197,7 @@ def read_datas(path, word2id, labels, labels_index, max_len=70):
         all_pos.append(pos_embedding)
         all_items.append(single_item)
         items.append(one_item)
-    return all_items, labels_index, all_pos,items  # 返回值是 训练数据 和 标签
+    return all_items, labels_index, all_pos, items  # 返回值是 训练数据 和 标签
 
 def load_data(batch_size,items,labels,all_pos):
     # shuffle  打乱数据为了 缓解过拟合
