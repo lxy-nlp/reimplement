@@ -110,6 +110,9 @@ venv.bak/
 model/
 model_*/
 process.py
+uncased_L-12_H-768_A-12/
+data/
+eval/
 
 data/cached*
 proposed_answers.txt

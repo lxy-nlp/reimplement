@@ -17,23 +17,45 @@ class FCLayer(nn.Module):
             x = self.tanh(x)
         return self.linear(x)
 
+class PosEnCodeLayer(nn.Module):
+    '''
+    输入:    原始位置嵌入
+            最终位置嵌入的维度
+            是否使用pos
+    输出:    [x,pos]
+    '''
+    def __init__(self, init_size, pos_dim, dropout, use_pos=True):
+        super(PosEnCodeLayer, self).__init__()
+        self.use_pos = use_pos
+        self.linear = nn.Linear(init_size, pos_dim)
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x, init_pos):
+        if self.use_pos:
+            pos_emb = self.linear(init_pos)
+            pos_emb = self.dropout(pos_emb)
+            x = torch.cat((x, pos_emb), -1)
+        return x
+
+
 
 class RBERT(BertPreTrainedModel):
     def __init__(self, config, args):
         super(RBERT, self).__init__(config)
         self.bert = BertModel(config=config)  # Load pretrained bert
-
         self.num_labels = config.num_labels
-
-        self.cls_fc_layer = FCLayer(config.hidden_size, config.hidden_size, args.dropout_rate)
-        self.entity_fc_layer = FCLayer(config.hidden_size, config.hidden_size, args.dropout_rate)
+        self.pos_layer = PosEnCodeLayer(4, args.pos_dim, args.dropout_rate, args.use_pos)
+        self.pos_dim = args.pos_dim if args.use_pos else 0
+        self.hidden_size = self.pos_dim + config.hidden_size
+        self.cls_fc_layer = FCLayer(self.hidden_size, config.hidden_size, args.dropout_rate)
+        self.entity_fc_layer = FCLayer(self.hidden_size, config.hidden_size, args.dropout_rate)
         self.label_classifier = FCLayer(
-            config.hidden_size * 3,
+            config.hidden_size * 4,
             config.num_labels,
             args.dropout_rate,
-            use_activation=False,
+            use_activation=True,
         )
-
+        self.cls_fc_layer_pool = FCLayer(config.hidden_size, config.hidden_size, args.dropout_rate)
     @staticmethod
     def entity_average(hidden_output, e_mask):
         """
@@ -51,24 +73,28 @@ class RBERT(BertPreTrainedModel):
         avg_vector = sum_vector.float() / length_tensor.float()  # broadcasting
         return avg_vector
 
-    def forward(self, input_ids, attention_mask, token_type_ids, labels, e1_mask, e2_mask):
+    def forward(self, input_ids, attention_mask, token_type_ids, labels, e1_mask, e2_mask, pos_emb):
         outputs = self.bert(
             input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids
         )  # sequence_output, pooled_output, (hidden_states), (attentions)
         sequence_output = outputs[0]
+        sequence_output = self.pos_layer(sequence_output, pos_emb)
         pooled_output = outputs[1]  # [CLS]
+
 
         # Average
         e1_h = self.entity_average(sequence_output, e1_mask)
         e2_h = self.entity_average(sequence_output, e2_mask)
 
         # Dropout -> tanh -> fc_layer (Share FC layer for e1 and e2)
-        pooled_output = self.cls_fc_layer(pooled_output)
+        pooled_output = self.cls_fc_layer_pool(pooled_output)  # 句子向量
         e1_h = self.entity_fc_layer(e1_h)
         e2_h = self.entity_fc_layer(e2_h)
 
+        # 哈达玛乘积
+        entityDot = e1_h * e2_h
         # Concat -> fc_layer
-        concat_h = torch.cat([pooled_output, e1_h, e2_h], dim=-1)
+        concat_h = torch.cat([pooled_output, e1_h, e2_h, entityDot], dim=-1)
         logits = self.label_classifier(concat_h)
 
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here

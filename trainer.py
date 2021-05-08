@@ -34,6 +34,7 @@ class Trainer(object):
 
         # GPU or CPU
         self.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
+        print(self.device)
         self.model.to(self.device)
 
     def train(self):
@@ -103,6 +104,7 @@ class Trainer(object):
                     "labels": batch[3],
                     "e1_mask": batch[4],
                     "e2_mask": batch[5],
+                    "pos_emb": batch[6],
                 }
                 outputs = self.model(**inputs)
                 loss = outputs[0]
@@ -170,6 +172,7 @@ class Trainer(object):
                     "labels": batch[3],
                     "e1_mask": batch[4],
                     "e2_mask": batch[5],
+                    "pos_emb": batch[6],
                 }
                 outputs = self.model(**inputs)
                 tmp_eval_loss, logits = outputs[:2]

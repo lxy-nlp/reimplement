@@ -3,7 +3,8 @@ import csv
 import json
 import logging
 import os
-
+import numpy as np
+from nltk.corpus import wordnet
 import torch
 from torch.utils.data import TensorDataset
 
@@ -54,13 +55,14 @@ class InputFeatures(object):
         token_type_ids: Segment token indices to indicate first and second portions of the inputs.
     """
 
-    def __init__(self, input_ids, attention_mask, token_type_ids, label_id, e1_mask, e2_mask):
+    def __init__(self, input_ids, attention_mask, token_type_ids, label_id, e1_mask, e2_mask, pos_emb):
         self.input_ids = input_ids
         self.attention_mask = attention_mask
         self.token_type_ids = token_type_ids
         self.label_id = label_id
         self.e1_mask = e1_mask
         self.e2_mask = e2_mask
+        self.pos_emb = pos_emb
 
     def __repr__(self):
         return str(self.to_json_string())
@@ -161,6 +163,8 @@ def convert_examples_to_features(
         e21_p += 1
         e22_p += 1
 
+        sub = [e11_p, e12_p]
+        obj = [e21_p, e22_p]
         # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
         if add_sep_token:
             special_tokens_count = 2
@@ -184,6 +188,7 @@ def convert_examples_to_features(
         attention_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
 
         # Zero-pad up to the sequence length.
+        truth_length = len(input_ids)
         padding_length = max_seq_len - len(input_ids)
         input_ids = input_ids + ([pad_token] * padding_length)
         attention_mask = attention_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
@@ -218,7 +223,7 @@ def convert_examples_to_features(
             logger.info("label: %s (id = %d)" % (example.label, label_id))
             logger.info("e1_mask: %s" % " ".join([str(x) for x in e1_mask]))
             logger.info("e2_mask: %s" % " ".join([str(x) for x in e2_mask]))
-
+        pos_emb = pos_encoding(truth_length, sub, obj, max_seq_len)
         features.append(
             InputFeatures(
                 input_ids=input_ids,
@@ -227,6 +232,7 @@ def convert_examples_to_features(
                 label_id=label_id,
                 e1_mask=e1_mask,
                 e2_mask=e2_mask,
+                pos_emb=pos_emb,
             )
         )
 
@@ -273,7 +279,7 @@ def load_and_cache_examples(args, tokenizer, mode):
     all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
     all_e1_mask = torch.tensor([f.e1_mask for f in features], dtype=torch.long)  # add e1 mask
     all_e2_mask = torch.tensor([f.e2_mask for f in features], dtype=torch.long)  # add e2 mask
-
+    all_pos_emb = torch.tensor([f.pos_emb for f in features], dtype=torch.float32)  # add pos emb
     all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
 
     dataset = TensorDataset(
@@ -281,7 +287,98 @@ def load_and_cache_examples(args, tokenizer, mode):
         all_attention_mask,
         all_token_type_ids,
         all_label_ids,
-        all_e1_mask,
-        all_e2_mask,
+        all_e1_mask,  # 标记实体e1
+        all_e2_mask,  # 标记实体e2
+        all_pos_emb
     )
     return dataset
+
+
+def pos_encoding(seq_len,sub,obj,max_len):
+    '''
+    :param items: data_item list
+    :param vocab_size
+    :return:
+    '''
+    pos_embedding = np.zeros((max_len, 4))
+    for i in range(0, seq_len):
+        pos_embedding[i][0] = i
+        pos_embedding[i][1] = i - sub[0]
+        pos_embedding[i][2] = i - obj[0]
+        pos_embedding[i][3] = sub[0] - obj[0]
+    pos_embedding /= seq_len
+    return pos_embedding
+
+
+# 使用Wordnet增强数据
+def data_argument(file_path, types, ratio, tokenizer):
+    """
+    :param file_path: 训练数据的路径
+    :param ratio: 单词随机替换的比例
+    :param types: 需要扩充的类型
+    :param target: 扩充的上限
+    :return:
+    需要扩充的类型
+    Member-Collection(e1,e2)  Message-Topic(e2,e1) Entity-Origin(e2,e1)
+    Content-Container(e2,e1)  Entity-Destination(e2,e1)  Instrument-Agency(e1,e2)
+    """
+    with open(file_path, 'r') as f:
+        data = f.readlines()
+        labels = [item.split('\t')[0] for item in data]
+        sentences = [item.split('\t')[1] for item in data]
+        alladd = []
+        for t,sentence in zip(range(len(sentences)),sentences):
+            if labels[t] in types:
+                sentence = clear(sentence)
+                sensp = tokenizer.tokenize(sentence)
+                e11 = sensp.index('<e1>')
+                e12 = sensp.index('</e1>')
+                e21 = sensp.index('<e2>')
+                e22 = sensp.index('</e2>')
+                n = len(sensp) - (e12 - e11 + e22 - e21 + 2)
+                n = int(n * ratio)
+                count = 0
+                newsentence = []
+                for i in range(len(sensp)):
+                    synword = wordnet.synsets(sensp[i])
+                    if i in range(e11, e12+1) or i in range(e21, e22+1) or count > n:
+                        newsentence.append(sensp[i])
+                    elif len(synword) < 1 or (len(synword) == 1 and synword[0].lemma_names()[0] == sensp[i]):
+                        newsentence.append(sensp[i])
+                    elif synword[0].lemma_names()[0] == sensp[i] and len(synword) > 1:
+                        synword = synword[1].lemma_names()[0]
+                        newsentence.append(synword)
+                        count += 1
+                    elif synword[0].lemma_names()[0] != sensp[i]:
+                        synword = synword[0].lemma_names()[0]
+                        newsentence.append(synword)
+                        count += 1
+                sample = ' '.join(newsentence)
+                sample = labels[t]+'\t'+sample+'\n'
+                alladd.append(sample)
+        return alladd
+
+def clear(text):
+    text = text.replace('.','')
+    text = text.replace('!','')
+    text = text.replace('?','')
+    text = text.replace('...','')
+    return text
+
+
+if __name__ == '__main__':
+    from transformers import BertTokenizer
+    path = './data/train.tsv'
+    types = ['Member-Collection(e1,e2)', 'Message-Topic(e2,e1)', 'Entity-Origin(e2,e1)',
+    'Content-Container(e2,e1)', 'Entity-Destination(e2,e1)', 'Instrument-Agency(e1,e2)']
+    ratio = 0.5
+    ADDITIONAL_SPECIAL_TOKENS = ["<e1>", "</e1>", "<e2>", "</e2>"]
+    modelpath = './uncased_L-12_H-768_A-12'
+    tokenizer = BertTokenizer.from_pretrained(modelpath)
+    tokenizer.add_special_tokens({"additional_special_tokens": ADDITIONAL_SPECIAL_TOKENS})
+    res = data_argument(path,types,ratio,tokenizer)
+    with open('./data/train_add.tsv','a') as f:
+        for line in res:
+            f.write(line)
+
+

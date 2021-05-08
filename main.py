@@ -47,16 +47,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name_or_path",
         type=str,
-        default="bert-base-uncased",
+        default="./uncased_L-12_H-768_A-12",
         help="Model Name or Path",
     )
 
     parser.add_argument("--seed", type=int, default=77, help="random seed for initialization")
-    parser.add_argument("--train_batch_size", default=16, type=int, help="Batch size for training.")
+    parser.add_argument("--train_batch_size", default=8, type=int, help="Batch size for training.")
     parser.add_argument("--eval_batch_size", default=32, type=int, help="Batch size for evaluation.")
     parser.add_argument(
         "--max_seq_len",
-        default=384,
+        default=100,
         type=int,
         help="The maximum total input sequence length after tokenization.",
     )
@@ -94,6 +94,8 @@ if __name__ == "__main__":
         type=float,
         help="Dropout for fully-connected layers",
     )
+    parser.add_argument("--pos_dim",type=int, default=30)
+    parser.add_argument("--use_pos",type=bool, default=False)
 
     parser.add_argument("--logging_steps", type=int, default=250, help="Log every X updates steps.")
     parser.add_argument(
@@ -112,6 +114,9 @@ if __name__ == "__main__":
         help="Add [SEP] token at the end of the sentence",
     )
 
+    parser.add_argument(
+        "--use_argument", type=int, default=True, help="Whether to add syn word"
+    )
     args = parser.parse_args()
-
+    print(args)
     main(args)
